@@ -20,10 +20,7 @@ import {
   Info,
   ExternalLink
 } from 'lucide-react';
-
-// FIX: Import the configured client from your local file
-import { supabase } from './services/supabase';
-
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { 
   Driver, 
   Route, 
@@ -31,6 +28,17 @@ import {
   Settlement, 
   PaymentPreference
 } from './types';
+
+// --- Supabase Initialization ---
+// Vite requires variables to start with VITE_ to be exposed to the frontend
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+let supabase: SupabaseClient | null = null;
+
+if (supabaseUrl && supabaseAnonKey) {
+  supabase = createClient(supabaseUrl, supabaseAnonKey);
+}
 
 // --- Reusable UI Components ---
 
@@ -132,7 +140,7 @@ const App: React.FC = () => {
     fetchData();
   }, []);
 
-  // Local Storage synchronization (only if Supabase is missing)
+  // Sync with Local Storage only if Cloud is not connected
   useEffect(() => {
     if (!supabase) {
       localStorage.setItem('drive_pay_drivers', JSON.stringify(drivers));
@@ -280,7 +288,7 @@ const App: React.FC = () => {
 
       const { error: sErr } = await supabase.from('settlements').insert([newSettlement]);
 
-      if (tErr || sErr) return console.error("Supabase Error:", tErr || sErr);
+      if (tErr || sErr) return console.error("Supabase Error during settlement:", tErr || sErr);
     }
 
     setSettlements([newSettlement, ...settlements]);
@@ -306,7 +314,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#f8fafc]">
-      {/* Sidebar */}
+      {/* Navigation Sidebar */}
       <aside className="w-full md:w-64 bg-slate-900 text-white p-6 flex flex-col shrink-0">
         <div className="flex items-center gap-3 mb-10 px-2">
           <div className="bg-indigo-600 p-2 rounded-xl shadow-lg shadow-indigo-500/20">
@@ -343,9 +351,45 @@ const App: React.FC = () => {
                 <div className={`w-1.5 h-1.5 rounded-full ${supabase ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
                 {supabase ? 'Cloud Synchronized' : 'Local Storage Mode'}
             </div>
+            {!supabase && (
+              <button 
+                onClick={() => setShowConfigWarning(true)}
+                className="text-[9px] text-slate-500 hover:text-white underline"
+              >
+                Why Local Mode?
+              </button>
+            )}
         </div>
       </aside>
 
+      {/* Warning UI for missing keys */}
+      {showConfigWarning && !supabase && (
+        <div className="fixed bottom-6 right-6 z-[60] max-w-sm bg-slate-900 text-white p-5 rounded-2xl shadow-2xl border border-white/10 animate-in fade-in slide-in-from-right-4">
+          <div className="flex justify-between items-start mb-3">
+            <div className="flex items-center gap-2 text-amber-500">
+              <AlertCircle className="w-5 h-5" />
+              <span className="font-bold text-sm">Action Required: Vercel Config</span>
+            </div>
+            <button onClick={() => setShowConfigWarning(false)} className="text-slate-500 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+            Database connection failed. Ensure <strong>VITE_SUPABASE_URL</strong> and <strong>VITE_SUPABASE_ANON_KEY</strong> are added to your Vercel Environment Variables.
+          </p>
+          <div className="flex flex-col gap-2">
+            <a 
+              href="https://vercel.com" 
+              target="_blank" 
+              className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 py-2 rounded-lg text-xs font-bold transition-all"
+            >
+              Configure Vercel <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Main Panel */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-6xl mx-auto p-6 md:p-10">
           
@@ -365,6 +409,10 @@ const App: React.FC = () => {
               <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                   <h3 className="text-lg font-bold text-slate-900">Active Payroll Cycles</h3>
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase">
+                      <div className={`w-2 h-2 rounded-full ${supabase ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                      {supabase ? 'Live Cloud Data' : 'Local Instance'}
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
@@ -389,8 +437,20 @@ const App: React.FC = () => {
                             <td className="px-6 py-4 text-right font-black text-indigo-600">₹{batta}</td>
                             <td className="px-6 py-4 text-right font-black text-amber-600">₹{salary}</td>
                             <td className="px-6 py-4 text-right space-x-2">
-                              <button onClick={() => settlePayment(driver.id, 'WEEKLY')} disabled={batta === 0} className="px-4 py-2 rounded-xl text-[10px] font-black bg-indigo-600 text-white disabled:bg-slate-100 hover:bg-indigo-700 transition-all shadow-sm uppercase">Pay Weekly</button>
-                              <button onClick={() => settlePayment(driver.id, 'MONTHLY')} disabled={salary === 0} className="px-4 py-2 rounded-xl text-[10px] font-black bg-amber-600 text-white disabled:bg-slate-100 hover:bg-amber-700 transition-all shadow-sm uppercase">Pay Monthly</button>
+                              <button 
+                                onClick={() => settlePayment(driver.id, 'WEEKLY')} 
+                                disabled={batta === 0} 
+                                className="px-4 py-2 rounded-xl text-[10px] font-black bg-indigo-600 text-white disabled:bg-slate-100 disabled:text-slate-400 hover:bg-indigo-700 transition-all shadow-sm uppercase"
+                              >
+                                Pay Weekly
+                              </button>
+                              <button 
+                                onClick={() => settlePayment(driver.id, 'MONTHLY')} 
+                                disabled={salary === 0} 
+                                className="px-4 py-2 rounded-xl text-[10px] font-black bg-amber-600 text-white disabled:bg-slate-100 disabled:text-slate-400 hover:bg-amber-700 transition-all shadow-sm uppercase"
+                              >
+                                Pay Monthly
+                              </button>
                             </td>
                           </tr>
                         );
@@ -409,8 +469,12 @@ const App: React.FC = () => {
                   <h2 className="text-4xl font-black text-slate-900 tracking-tight">Driver Fleet</h2>
                   <p className="text-slate-500 font-medium">Add or remove drivers from the active roster.</p>
                 </div>
-                <button onClick={() => setShowDriverModal(true)} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all">
-                  <Plus className="w-5 h-5" /> New Driver
+                <button 
+                  onClick={() => setShowDriverModal(true)} 
+                  className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all"
+                >
+                  <Plus className="w-5 h-5" />
+                  New Driver
                 </button>
               </header>
 
@@ -418,7 +482,9 @@ const App: React.FC = () => {
                   {drivers.map(driver => (
                   <div key={driver.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-indigo-200 transition-all">
                       <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 font-black text-xl">{driver.name.charAt(0)}</div>
+                      <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 font-black text-xl">
+                          {driver.name.charAt(0)}
+                      </div>
                       <div>
                           <h4 className="text-lg font-black text-slate-900">{driver.name}</h4>
                           <p className="text-sm font-bold text-slate-400 uppercase tracking-tighter">{driver.vehicleId}</p>
@@ -426,7 +492,12 @@ const App: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-2">
                           <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-2 py-1 rounded-md uppercase tracking-widest">{driver.preference.replace('_', ' ')}</span>
-                          <button onClick={() => removeDriver(driver.id)} className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-5 h-5" /></button>
+                          <button 
+                              onClick={() => removeDriver(driver.id)}
+                              className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                          >
+                              <Trash2 className="w-5 h-5" />
+                          </button>
                       </div>
                   </div>
                   ))}
@@ -436,13 +507,25 @@ const App: React.FC = () => {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-black text-slate-400 uppercase mb-2">Driver Name</label>
-                    <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" value={newDriver.name || ''} onChange={e => setNewDriver({...newDriver, name: e.target.value})} placeholder="e.g. John Doe" />
+                    <input 
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" 
+                      value={newDriver.name || ''} 
+                      onChange={e => setNewDriver({...newDriver, name: e.target.value})} 
+                      placeholder="e.g. John Doe" 
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-black text-slate-400 uppercase mb-2">Vehicle Plate</label>
-                    <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" value={newDriver.vehicleId || ''} onChange={e => setNewDriver({...newDriver, vehicleId: e.target.value})} placeholder="e.g. MH 12 AB 1234" />
+                    <input 
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" 
+                      value={newDriver.vehicleId || ''} 
+                      onChange={e => setNewDriver({...newDriver, vehicleId: e.target.value})} 
+                      placeholder="e.g. MH 12 AB 1234" 
+                    />
                   </div>
-                  <button onClick={addDriver} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-black hover:bg-indigo-700 transition-all shadow-lg">Add to Fleet</button>
+                  <button onClick={addDriver} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-black hover:bg-indigo-700 transition-all shadow-lg">
+                    Add to Fleet
+                  </button>
                 </div>
               </Modal>
             </div>
@@ -454,8 +537,12 @@ const App: React.FC = () => {
                 <div>
                   <h2 className="text-4xl font-black text-slate-900 tracking-tight">Routes</h2>
                 </div>
-                <button onClick={() => setShowRouteModal(true)} className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 shadow-lg">
-                  <Plus className="w-5 h-5" /> Define Route
+                <button 
+                  onClick={() => setShowRouteModal(true)} 
+                  className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 shadow-lg"
+                >
+                  <Plus className="w-5 h-5" />
+                  Define Route
                 </button>
               </header>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -463,7 +550,9 @@ const App: React.FC = () => {
                 <div key={route.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm transition-all">
                     <div className="flex items-center justify-between mb-4 font-black">
                       <span>{route.from} → {route.to}</span>
-                      <button onClick={() => removeRoute(route.id)} className="text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                      <button onClick={() => removeRoute(route.id)} className="text-slate-300 hover:text-red-500">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                     <div className="flex gap-4 text-xs font-black text-slate-400 uppercase">
                       <div className="bg-slate-50 p-3 rounded-2xl flex-1">Weekly: ₹{route.battaRate}</div>
@@ -503,7 +592,9 @@ const App: React.FC = () => {
                     {routes.map(r => <option key={r.id} value={r.id}>{r.from} → {r.to}</option>)}
                   </select>
                 </div>
-                <button onClick={logTrip} disabled={!tripForm.driverId || !tripForm.routeId} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-lg disabled:bg-slate-100 shadow-xl transition-all">Log Trip</button>
+                <button onClick={logTrip} disabled={!tripForm.driverId || !tripForm.routeId} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-lg disabled:bg-slate-100 shadow-xl transition-all">
+                  Log Trip
+                </button>
               </div>
             </div>
           )}
@@ -511,12 +602,26 @@ const App: React.FC = () => {
           {activeTab === 'settlements' && (
             <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
               <header><h2 className="text-4xl font-black text-slate-900 tracking-tight">History</h2></header>
-              {settlements.map(s => (
-                <div key={s.id} className="bg-white p-6 rounded-3xl border border-slate-100 flex items-center justify-between">
-                  <div className="font-bold">{drivers.find(d => d.id === s.driverId)?.name}</div>
-                  <div className="text-right"><div className="text-2xl font-black">₹{s.amount}</div><div className="text-[10px] text-emerald-500 font-black">SETTLED</div></div>
+              {settlements.length === 0 ? (
+                 <div className="text-center py-32 bg-white rounded-3xl border border-dashed border-slate-200">
+                   <p className="text-slate-400 font-bold">No payouts found.</p>
+                 </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {settlements.map(s => (
+                    <div key={s.id} className="bg-white p-6 rounded-3xl border border-slate-100 flex items-center justify-between">
+                      <div className="font-bold">
+                        <div>{drivers.find(d => d.id === s.driverId)?.name || 'Unknown Driver'}</div>
+                        <div className="text-[10px] text-slate-400 uppercase">{s.type} CYCLE</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-2xl font-black">₹{s.amount}</div>
+                        <div className="text-[10px] text-emerald-500 font-black">SETTLED</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
 
